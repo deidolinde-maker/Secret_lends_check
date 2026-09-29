@@ -42,7 +42,7 @@ secret-landings-urls
 Proxy_for_secret_lend
 telegram_proxy_url          # временный Everyday Test
 telegram_proxy_auth_secret  # временный Everyday Test
-telegram_proxy_global_test  # временный Everyday Test
+tg_proxy_creds_survarius    # временный Everyday Test
 ```
 
 Для публикации Allure в Jenkins должен быть установлен Allure Jenkins plugin. Если plugin ещё не установлен, build всё равно сохранит `allure-results` как artifact, но шаг публикации потребуется включить после установки plugin.
