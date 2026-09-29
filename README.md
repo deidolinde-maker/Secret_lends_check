@@ -1,0 +1,40 @@
+# Secret_lends_check
+
+Мониторинг доступности лендингов из Jenkins Secret File `secret-landings-urls`.
+
+Jenkins Credential для dedicated proxy: `Proxy_for_secret_lend`. Значение proxy не хранится в репозитории и передаётся только через credentials binding.
+
+## Первый запуск
+
+```powershell
+python monitor.py `
+  --urls-file secret_landings_urls.json `
+  --proxy-url http://user:password@proxy.example:8080 `
+  --expected-ip 203.0.113.10 `
+  --allure-dir allure-results
+```
+
+До проверки URL выполняется proxy preflight. При трёх неудачных попытках прогон останавливается с сообщением `Ошибка подключения прокси, прогон остановлен`; прямой fallback отсутствует.
+
+Без `--proxy-url` монитор отказывается запускаться. Локальные `HTTP_PROXY`, `HTTPS_PROXY` и `NO_PROXY` не используются: маршрут задаётся только явным dedicated proxy из Jenkins.
+
+## Временные алерты
+
+Для включения Telegram alerts в Jenkins задать:
+
+```text
+ALERTS_ENABLED=true
+TELEGRAM_PROXY_URL=<credential binding>
+TELEGRAM_PROXY_AUTH_SECRET=<credential binding>
+TELEGRAM_PROXY_CREDS=<Everyday Test temporary credential binding>
+```
+
+При ошибке отправляется alert по странице. Если весь прогон успешен, отправляется временный mini-report с количеством страниц, количеством ошибок, SSL-проблемами и длительностью прогона. Локально alerts выключены по умолчанию.
+
+`secret_landings_urls.json` не хранится в репозитории. Он передаётся в job как Jenkins Secret File.
+
+## Проверки
+
+```powershell
+pytest -q
+```
