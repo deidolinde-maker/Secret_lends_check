@@ -51,6 +51,8 @@ pipeline {
                     "$PYTHON_BIN" -m venv .venv
                     .venv/bin/python -m pip install --upgrade pip
                     .venv/bin/pip install -r requirements.txt
+                    .venv/bin/pip install --upgrade certifi
+                    .venv/bin/python -c 'import certifi; print("CA bundle:", certifi.where())'
                 '''
             }
         }
