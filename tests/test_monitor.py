@@ -51,7 +51,11 @@ def test_probe_classifies_403_as_ok(monkeypatch):
         def get(self, *args, **kwargs):
             return FakeResponse()
 
-    result = probe_url(UrlTarget("example.com", "https://example.com"), {"https": "http://proxy:8080"}, session=FakeSession())
+    result = probe_url(
+        UrlTarget("example.com", "https://example.com"),
+        {"http": "http://proxy:8080", "https": "http://proxy:8080"},
+        session=FakeSession(),
+    )
     assert result.classification == "OK"
     assert result.status_code == 403
 
