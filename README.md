@@ -33,6 +33,20 @@ TELEGRAM_PROXY_CREDS=<Everyday Test temporary credential binding>
 
 `secret_landings_urls.json` не хранится в репозитории. Он передаётся в job как Jenkins Secret File.
 
+## Jenkins Pipeline
+
+Job должна быть Pipeline job с `Pipeline script from SCM` и веткой `main`. Jenkinsfile использует credentials:
+
+```text
+secret-landings-urls
+Proxy_for_secret_lend
+telegram_proxy_url          # временный Everyday Test
+telegram_proxy_auth_secret  # временный Everyday Test
+telegram_proxy_global_test  # временный Everyday Test
+```
+
+Для публикации Allure в Jenkins должен быть установлен Allure Jenkins plugin. Если plugin ещё не установлен, build всё равно сохранит `allure-results` как artifact, но шаг публикации потребуется включить после установки plugin.
+
 ## Проверки
 
 ```powershell
