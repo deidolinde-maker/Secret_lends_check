@@ -46,6 +46,8 @@ pipeline {
             steps {
                 sh '''
                     set -eu
+                    rm -rf allure-results
+                    mkdir -p allure-results
                     "$PYTHON_BIN" -m venv .venv
                     .venv/bin/python -m pip install --upgrade pip
                     .venv/bin/pip install -r requirements.txt
@@ -57,7 +59,7 @@ pipeline {
             steps {
                 sh '''
                     set -eu
-                    .venv/bin/pytest -q
+                    PYTHONPATH=. .venv/bin/pytest -q
                 '''
             }
         }
@@ -97,10 +99,16 @@ pipeline {
 
     post {
         always {
-            archiveArtifacts artifacts: 'allure-results/**', allowEmptyArchive: true, fingerprint: true
             script {
-                if (fileExists('allure-results')) {
+                def hasAllureResults = sh(
+                    script: "find allure-results -type f -name '*-result.json' | grep -q .",
+                    returnStatus: true
+                ) == 0
+                if (hasAllureResults) {
+                    archiveArtifacts artifacts: 'allure-results/**', allowEmptyArchive: false, fingerprint: true
                     allure includeProperties: false, jdk: '', results: [[path: 'allure-results']]
+                } else {
+                    echo 'Allure results are absent; report publication skipped.'
                 }
             }
         }
