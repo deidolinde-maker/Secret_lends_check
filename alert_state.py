@@ -51,7 +51,9 @@ def observe_error(
     previous = state.get(key, {})
     consecutive = int(previous.get("consecutive_runs", 0)) + 1
     first_seen = previous.get("first_seen_at", started_at)
-    due = notification_due(consecutive, previous.get("last_notified_at"), started_at)
+    # Legacy state files did not record delivery confirmation. Retry once for
+    # those entries so an earlier failed/disabled sender cannot suppress alerts.
+    due = notification_due(consecutive, previous.get("last_notified_at"), started_at) or previous.get("notification_delivered") is not True
     current = {
         "active": True,
         "site": site,
@@ -59,11 +61,26 @@ def observe_error(
         "first_seen_at": first_seen,
         "last_seen_at": started_at,
         "consecutive_runs": consecutive,
-        "last_notified_at": started_at if due else previous.get("last_notified_at"),
+        # Notification time is updated only after Telegram confirms delivery.
+        "last_notified_at": previous.get("last_notified_at"),
+        "notification_delivered": previous.get("notification_delivered", False),
         "last_urls": sorted(urls),
     }
     state[key] = current
     return current, due
+
+
+def mark_notification_sent(
+    state: dict[str, dict[str, Any]],
+    *,
+    site: str,
+    error_type: str,
+    notified_at: str,
+) -> None:
+    entry = state.get(state_key(site, error_type))
+    if entry is not None:
+        entry["last_notified_at"] = notified_at
+        entry["notification_delivered"] = True
 
 
 def close_error(state: dict[str, dict[str, Any]], *, site: str, error_type: str) -> dict[str, Any] | None:

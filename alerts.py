@@ -45,6 +45,7 @@ class TelegramProxySender:
                 else:
                     LOGGER.error("Telegram proxy returned %s", response.status_code)
                 return False
+            LOGGER.info("Telegram alert delivery confirmed")
             return True
         except requests.RequestException as exc:
             LOGGER.error("Telegram proxy delivery failed: %s", exc)

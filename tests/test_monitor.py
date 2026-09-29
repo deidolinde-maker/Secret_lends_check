@@ -5,7 +5,7 @@ import requests
 
 from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record
 from alerts import MAX_TELEGRAM_TEXT_LENGTH, format_group_alert, format_success_mini_report
-from alert_state import notification_due
+from alert_state import mark_notification_sent, notification_due, observe_error
 
 
 def test_load_targets_rejects_duplicate_urls(tmp_path: Path):
@@ -136,3 +136,25 @@ def test_large_group_alert_uses_one_compact_domain_message():
     assert len(messages[0]) < MAX_TELEGRAM_TEXT_LENGTH
     assert "Все страницы домена вернули ошибку HTTP_5XX (500 страниц)" in messages[0]
     assert "page-499" not in messages[0]
+
+
+def test_notification_is_marked_only_after_delivery():
+    state = {}
+    series, due = observe_error(
+        state,
+        site="example.com",
+        error_type="HTTP_5XX",
+        urls=["https://example.com"],
+        started_at="2026-09-29T10:00:00+00:00",
+    )
+    assert due is True
+    assert series["last_notified_at"] is None
+    assert series["notification_delivered"] is False
+    mark_notification_sent(
+        state,
+        site="example.com",
+        error_type="HTTP_5XX",
+        notified_at="2026-09-29T10:00:01+00:00",
+    )
+    assert state["example.com||HTTP_5XX"]["last_notified_at"] == "2026-09-29T10:00:01+00:00"
+    assert state["example.com||HTTP_5XX"]["notification_delivered"] is True

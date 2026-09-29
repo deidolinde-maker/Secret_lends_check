@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
-from alert_state import close_error, load_state, observe_error, save_state
+from alert_state import close_error, load_state, mark_notification_sent, observe_error, save_state
 from alerts import (
     format_group_alert,
     format_policy_warning,
@@ -328,6 +328,8 @@ def run_once(
     proxies = proxy_mapping(proxy_url)
     sender = sender_from_env()
     state = load_state(alert_state_file)
+    if sender is None:
+        LOGGER.warning("Telegram alerts are disabled or unavailable; no alert messages will be sent")
     grouped: dict[str, list[UrlTarget]] = {}
     for target in targets:
         grouped.setdefault(target.site, []).append(target)
@@ -383,10 +385,27 @@ def run_once(
                 )
                 if sender and due:
                     if error_type == "HTTP_401_POLICY":
-                        sender.send(format_policy_warning(site, current_results, started_at))
+                        delivered = sender.send(format_policy_warning(site, current_results, started_at))
                     else:
+                        delivered = True
                         for message in format_group_alert(site, error_type, current_results, series, started_at):
-                            sender.send(message)
+                            delivered = sender.send(message) and delivered
+                    if delivered:
+                        mark_notification_sent(
+                            state,
+                            site=site,
+                            error_type=error_type,
+                            notified_at=started_at,
+                        )
+                        LOGGER.info("Telegram alert delivered: site=%s error_type=%s", site, error_type)
+                    else:
+                        LOGGER.warning(
+                            "Telegram alert was not delivered; it will remain due for retry: site=%s error_type=%s",
+                            site,
+                            error_type,
+                        )
+                elif due:
+                    LOGGER.warning("Telegram alert is due but sender is unavailable: site=%s error_type=%s", site, error_type)
             else:
                 closed = close_error(state, site=site, error_type=error_type)
                 if sender and closed and error_type != "HTTP_401_POLICY":
