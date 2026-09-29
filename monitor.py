@@ -14,12 +14,21 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
-from alerts import format_error_alert, format_success_mini_report, sender_from_env
+from alert_state import close_error, load_state, observe_error, save_state
+from alerts import (
+    format_group_alert,
+    format_policy_warning,
+    format_recovery,
+    format_success_mini_report,
+    sender_from_env,
+)
 
 
 LOGGER = logging.getLogger("secret_landings")
 ERROR_TYPES = {"HTTP_404", "HTTP_5XX", "TIMEOUT", "NO_CONNECTION"}
+requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 
 @dataclass(frozen=True)
@@ -260,6 +269,7 @@ def run_once(
     timeout: float = 10,
     max_redirects: int = 10,
     preflight_attempts: int = 3,
+    alert_state_file: str | Path = "alert_state.json",
 ) -> dict[str, Any]:
     run_started = time.perf_counter()
     started_at = utc_now()
@@ -273,8 +283,10 @@ def run_once(
         "total": 0,
         "passed": 0,
         "failed": 0,
+        "broken": 0,
         "skipped": 0,
         "ssl_errors": 0,
+        "policy_warnings": 0,
         "results": [],
     }
     if not preflight.ok:
@@ -293,35 +305,75 @@ def run_once(
 
     targets = load_targets(urls_file)
     proxies = proxy_mapping(proxy_url)
-    for target in targets:
-        result = probe_url(target, proxies, timeout=timeout, max_redirects=max_redirects)
-        status = "failed" if result.classification != "OK" or result.ssl_error else "passed"
-        summary["total"] += 1
-        summary[status] += 1
-        if result.ssl_error:
-            summary["ssl_errors"] += 1
-        summary["results"].append({"site": target.site, **asdict(result)})
-        write_allure_result(
-            results_dir,
-            name=target.url,
-            status=status,
-            full_name=f"AUTOMATIZATION-35 / secret_landings / {target.site} / {target.url}",
-            labels={
-                "profile": "secret_landings",
-                "site": target.site,
-                "error_type": result.classification if result.classification != "OK" else "NONE",
-            },
-            steps=[{"name": "HTTP probe", "status": status}],
-            attachment_text=json.dumps(asdict(result), ensure_ascii=False),
-        )
-    summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
     sender = sender_from_env()
+    state = load_state(alert_state_file)
+    grouped: dict[str, list[UrlTarget]] = {}
+    for target in targets:
+        grouped.setdefault(target.site, []).append(target)
+
+    # Process and alert per site. We do not wait for the whole 689-page run.
+    for site, site_targets in grouped.items():
+        site_results: list[dict[str, Any]] = []
+        for target in site_targets:
+            result = probe_url(target, proxies, timeout=timeout, max_redirects=max_redirects)
+            is_policy_warning = result.status_code == 401 and result.classification == "OK"
+            status = "broken" if is_policy_warning else ("failed" if result.classification != "OK" or result.ssl_error else "passed")
+            summary["total"] += 1
+            summary[status] += 1
+            if result.ssl_error:
+                summary["ssl_errors"] += 1
+            result_dict = {"site": target.site, **asdict(result), "checked_at": started_at}
+            site_results.append(result_dict)
+            summary["results"].append(result_dict)
+            write_allure_result(
+                results_dir,
+                name=target.url,
+                status=status,
+                full_name=f"AUTOMATIZATION-35 / secret_landings / {target.site} / {target.url}",
+                labels={
+                    "profile": "secret_landings",
+                    "site": target.site,
+                    "error_type": "HTTP_401_POLICY" if is_policy_warning else ("SSL" if result.ssl_error else result.classification),
+                },
+                steps=[{"name": "HTTP probe", "status": status}],
+                attachment_text=json.dumps(result_dict, ensure_ascii=False),
+            )
+
+        current_by_type: dict[str, list[dict[str, Any]]] = {}
+        for result in site_results:
+            if result.get("ssl_error"):
+                current_by_type.setdefault("SSL", []).append(result)
+            if result["classification"] != "OK":
+                current_by_type.setdefault(result["classification"], []).append(result)
+            if result.get("status_code") == 401:
+                current_by_type.setdefault("HTTP_401_POLICY", []).append(result)
+
+        summary["policy_warnings"] += len(current_by_type.get("HTTP_401_POLICY", []))
+        known_types = {key.split("||", 1)[1] for key in state if key.startswith(f"{site}||")}
+        for error_type in sorted(known_types | set(current_by_type)):
+            current_results = current_by_type.get(error_type, [])
+            if current_results:
+                series, due = observe_error(
+                    state,
+                    site=site,
+                    error_type=error_type,
+                    urls=[item["url"] for item in current_results],
+                    started_at=started_at,
+                )
+                if sender and due:
+                    if error_type == "HTTP_401_POLICY":
+                        sender.send(format_policy_warning(site, current_results, started_at))
+                    else:
+                        for message in format_group_alert(site, error_type, current_results, series, started_at):
+                            sender.send(message)
+            else:
+                closed = close_error(state, site=site, error_type=error_type)
+                if sender and closed and error_type != "HTTP_401_POLICY":
+                    sender.send(format_recovery(site, error_type, closed, started_at))
+        save_state(alert_state_file, state)
+    summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
     if sender:
-        for result in summary["results"]:
-            if result["classification"] != "OK" or result.get("ssl_error"):
-                result["checked_at"] = started_at
-                sender.send(format_error_alert(result))
-        if summary["failed"] == 0 and summary["ssl_errors"] == 0:
+        if summary["failed"] == 0 and summary["ssl_errors"] == 0 and summary["policy_warnings"] == 0:
             sender.send(format_success_mini_report(summary))
     return summary
 
@@ -335,6 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--max-redirects", type=int, default=10)
     parser.add_argument("--preflight-attempts", type=int, default=3)
+    parser.add_argument("--alert-state-file", default="alert_state.json")
     return parser
 
 
@@ -349,6 +402,7 @@ def main() -> int:
         timeout=args.timeout,
         max_redirects=args.max_redirects,
         preflight_attempts=args.preflight_attempts,
+        alert_state_file=args.alert_state_file,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary["proxy_preflight"]["ok"] else 2

@@ -53,6 +53,15 @@ pipeline {
             }
         }
 
+        stage('Unit tests') {
+            steps {
+                sh '''
+                    set -eu
+                    .venv/bin/pytest -q
+                '''
+            }
+        }
+
         stage('Run secret landings monitor') {
             steps {
                 withCredentials([
@@ -69,6 +78,7 @@ pipeline {
                         sh '''
                             set -eu
                             rm -rf allure-results
+                            mkdir -p /var/lib/jenkins/secret_lends_check
                             .venv/bin/python monitor.py \\
                               --urls-file "$URLS_FILE" \\
                               --proxy-url "$PROXY_URL" \\
@@ -76,7 +86,8 @@ pipeline {
                               --allure-dir allure-results \\
                               --timeout "$HTTP_TIMEOUT_SECONDS" \\
                               --max-redirects "$REDIRECT_MAX_HOPS" \\
-                              --preflight-attempts 3
+                              --preflight-attempts 3 \\
+                              --alert-state-file /var/lib/jenkins/secret_lends_check/alert_state.json
                         '''
                     }
                 }

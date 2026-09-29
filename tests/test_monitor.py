@@ -5,6 +5,7 @@ import requests
 
 from monitor import UrlTarget, load_targets, proxy_preflight, probe_url
 from alerts import format_success_mini_report
+from alert_state import notification_due
 
 
 def test_load_targets_rejects_duplicate_urls(tmp_path: Path):
@@ -72,3 +73,11 @@ def test_success_mini_report_contains_duration_and_counts():
     )
     assert "Проверено страниц: 689" in report
     assert "Длительность прогона: 1234 мс" in report
+
+
+def test_notification_schedule_is_one_four_twelve_then_24_hours():
+    assert notification_due(1, None, "2026-09-29T10:00:00+00:00")
+    assert notification_due(4, "2026-09-29T10:00:00+00:00", "2026-09-29T10:20:00+00:00")
+    assert notification_due(12, "2026-09-29T10:00:00+00:00", "2026-09-29T10:20:00+00:00")
+    assert not notification_due(13, "2026-09-29T10:00:00+00:00", "2026-09-30T09:59:00+00:00")
+    assert notification_due(13, "2026-09-29T10:00:00+00:00", "2026-09-30T10:00:00+00:00")

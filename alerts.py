@@ -75,6 +75,62 @@ def format_error_alert(result: dict) -> str:
     return "\n".join(lines)
 
 
+def format_policy_warning(site: str, results: list[dict], checked_at: str) -> str:
+    urls = "\n".join(f"- {result['url']}" for result in results)
+    return "\n".join(
+        [
+            "⚠️ [WARNING] Возможная политика доступа сайта",
+            f"Сайт: {site}",
+            f"Страницы получили HTTP 401 ({len(results)}):",
+            urls,
+            f"Время проверки: {checked_at}",
+        ]
+    )
+
+
+def format_group_alert(site: str, error_type: str, results: list[dict], state: dict, checked_at: str) -> list[str]:
+    urls = [result["url"] for result in results]
+    if error_type == "SSL":
+        return [
+            "\n".join(
+                [
+                    "❌ [ALERT] Проблема с SSL сертификатом🔒",
+                    f"Сайт: {site}",
+                    f"Страница: {result['url']}",
+                    f"Время проверки: {checked_at}",
+                ]
+            )
+            for result in results
+        ]
+    if len(urls) >= 6:
+        return [
+            "\n".join(
+                [
+                    "❌ [ALERT] Ошибка доступа к страницам",
+                    f"Сайт: {site}",
+                    f"{len(urls)} страниц сайта вернули ошибку {error_type}",
+                    f"Время проверки: {checked_at}",
+                    f"Время первой фиксации ошибки: {state['first_seen_at']}",
+                    f"Сколько прогонов подряд падает: {state['consecutive_runs']}",
+                ]
+            )
+        ]
+    return [format_error_alert({**result, "site": site, "classification": error_type, "checked_at": checked_at}) for result in results]
+
+
+def format_recovery(site: str, error_type: str, state: dict, checked_at: str) -> str:
+    urls = state.get("last_urls", [])
+    return "\n".join(
+        [
+            "✅ [ALERT] Ошибка восстановлена",
+            f"Сайт: {site}",
+            f"Тип ошибки: {error_type}",
+            f"Восстановлено страниц: {len(urls)}",
+            f"Время проверки: {checked_at}",
+        ]
+    )
+
+
 def format_success_mini_report(summary: dict) -> str:
     return "\n".join(
         [
@@ -82,6 +138,7 @@ def format_success_mini_report(summary: dict) -> str:
             f"Проверено страниц: {summary['total']}",
             f"Ошибок: {summary['failed']}",
             f"SSL-проблем: {summary['ssl_errors']}",
+            f"Предупреждений policy: {summary.get('policy_warnings', 0)}",
             f"Время проверки: {summary['started_at']}",
             f"Длительность прогона: {summary['duration_ms']} мс",
         ]
