@@ -3,7 +3,7 @@ from pathlib import Path
 
 import requests
 
-from monitor import UrlTarget, load_targets, proxy_preflight, probe_url
+from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record
 from alerts import format_success_mini_report
 from alert_state import notification_due
 
@@ -81,3 +81,21 @@ def test_notification_schedule_is_one_four_twelve_then_24_hours():
     assert notification_due(12, "2026-09-29T10:00:00+00:00", "2026-09-29T10:20:00+00:00")
     assert not notification_due(13, "2026-09-29T10:00:00+00:00", "2026-09-30T09:59:00+00:00")
     assert notification_due(13, "2026-09-29T10:00:00+00:00", "2026-09-30T10:00:00+00:00")
+
+
+def test_ssl_failure_is_not_reported_as_available_when_http_is_200():
+    record = result_record(
+        "example.com",
+        HttpResult(
+            url="https://example.com",
+            final_url="https://example.com/",
+            status_code=200,
+            response_ms=100,
+            classification="OK",
+            ssl_error="certificate expired",
+        ),
+        "2026-09-29T10:00:00+00:00",
+    )
+    assert record["error_type"] == "SSL"
+    assert record["availability"] == "FAILED"
+    assert record["http_status_role"] == "DIAGNOSTIC_ONLY"

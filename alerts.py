@@ -59,16 +59,19 @@ def sender_from_env() -> TelegramProxySender | None:
 
 
 def format_error_alert(result: dict) -> str:
+    error_type = "SSL" if result.get("ssl_error") else result["classification"]
     lines = [
         "❌ [ALERT] Ошибка проверки лендинга",
         f"Сайт: {result['site']}",
         f"Страница: {result['url']}",
-        f"Тип ошибки: {result['classification']}",
+        f"Тип ошибки: {error_type}",
     ]
     if result.get("status_code") is not None:
         lines.append(f"HTTP-код: {result['status_code']}")
     if result.get("ssl_error"):
         lines.append("SSL: проблема с сертификатом")
+        if result.get("status_code") is not None:
+            lines.append(f"HTTP-код (диагностический): {result['status_code']}")
     if result.get("response_ms") is not None:
         lines.append(f"Время ответа: {result['response_ms']} мс")
     lines.append(f"Время проверки: {result['checked_at']}")

@@ -148,6 +148,27 @@ def _classification(status_code: int | None, error: Exception | None) -> str:
     return "OK"
 
 
+def result_record(site: str, result: HttpResult, checked_at: str) -> dict[str, Any]:
+    record = {"site": site, **asdict(result), "checked_at": checked_at}
+    if result.ssl_error:
+        record.update(
+            {
+                "error_type": "SSL",
+                "availability": "FAILED",
+                "http_status_role": "DIAGNOSTIC_ONLY",
+            }
+        )
+    else:
+        record.update(
+            {
+                "error_type": result.classification,
+                "availability": "OK" if result.classification == "OK" else "FAILED",
+                "http_status_role": "PRIMARY",
+            }
+        )
+    return record
+
+
 def probe_url(
     target: UrlTarget,
     proxies: dict[str, str],
@@ -322,7 +343,7 @@ def run_once(
             summary[status] += 1
             if result.ssl_error:
                 summary["ssl_errors"] += 1
-            result_dict = {"site": target.site, **asdict(result), "checked_at": started_at}
+            result_dict = result_record(target.site, result, started_at)
             site_results.append(result_dict)
             summary["results"].append(result_dict)
             write_allure_result(
