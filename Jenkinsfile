@@ -66,6 +66,43 @@ pipeline {
             }
         }
 
+        stage('TLS CA diagnostics') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'Proxy_for_secret_lend', variable: 'PROXY_URL')
+                ]) {
+                    sh '''
+                        set -eu
+                        .venv/bin/python -c '
+import os
+from pathlib import Path
+
+import certifi
+import requests
+
+url = "https://t2-internet.online/"
+proxies = {"http": os.environ["PROXY_URL"], "https": os.environ["PROXY_URL"]}
+checks = [("certifi", certifi.where()), ("system", "/etc/ssl/certs/ca-certificates.crt")]
+
+for name, bundle in checks:
+    if not Path(bundle).exists():
+        print(f"TLS {name}: NOT_AVAILABLE path={bundle}")
+        continue
+    client = requests.Session()
+    client.trust_env = False
+    try:
+        response = client.get(url, proxies=proxies, verify=bundle, timeout=20)
+        print(f"TLS {name}: PASS status={response.status_code} bundle={bundle}")
+    except requests.RequestException as exc:
+        print(f"TLS {name}: FAIL {type(exc).__name__}: {exc}")
+    finally:
+        client.close()
+'
+                    '''
+                }
+            }
+        }
+
         stage('Run secret landings monitor') {
             steps {
                 withCredentials([
