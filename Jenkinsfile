@@ -98,6 +98,7 @@ for name, bundle in checks:
     finally:
         client.close()
 '
+                        .venv/bin/python tls_certificate_diagnostic.py
                     '''
                 }
             }
