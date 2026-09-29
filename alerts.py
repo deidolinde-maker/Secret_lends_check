@@ -9,6 +9,7 @@ import requests
 
 
 LOGGER = logging.getLogger("secret_landings.alerts")
+MAX_TELEGRAM_TEXT_LENGTH = 3500
 
 
 @dataclass
@@ -39,7 +40,10 @@ class TelegramProxySender:
                 timeout=self.timeout,
             )
             if not response.ok:
-                LOGGER.error("Telegram proxy returned %s", response.status_code)
+                if response.status_code == 429:
+                    LOGGER.error("Telegram proxy returned 429: rate limit while delivering alert")
+                else:
+                    LOGGER.error("Telegram proxy returned %s", response.status_code)
                 return False
             return True
         except requests.RequestException as exc:
@@ -93,32 +97,32 @@ def format_policy_warning(site: str, results: list[dict], checked_at: str) -> st
 
 def format_group_alert(site: str, error_type: str, results: list[dict], state: dict, checked_at: str) -> list[str]:
     urls = [result["url"] for result in results]
-    if error_type == "SSL":
-        return [
-            "\n".join(
-                [
-                    "❌ [ALERT] Проблема с SSL сертификатом🔒",
-                    f"Сайт: {site}",
-                    f"Страница: {result['url']}",
-                    f"Время проверки: {checked_at}",
-                ]
-            )
-            for result in results
-        ]
-    if len(urls) >= 6:
-        return [
-            "\n".join(
-                [
-                    "❌ [ALERT] Ошибка доступа к страницам",
-                    f"Сайт: {site}",
-                    f"{len(urls)} страниц сайта вернули ошибку {error_type}",
-                    f"Время проверки: {checked_at}",
-                    f"Время первой фиксации ошибки: {state['first_seen_at']}",
-                    f"Сколько прогонов подряд падает: {state['consecutive_runs']}",
-                ]
-            )
-        ]
-    return [format_error_alert({**result, "site": site, "classification": error_type, "checked_at": checked_at}) for result in results]
+    title = "❌ [ALERT] Проблема с SSL сертификатом🔒" if error_type == "SSL" else "❌ [ALERT] Ошибка проверки страниц"
+    lines = [
+        title,
+        f"Сайт: {site}",
+        f"Тип ошибки: {error_type}",
+        f"Страницы с ошибкой ({len(urls)}):",
+        *(f"- {url}" for url in urls),
+        f"Время проверки: {checked_at}",
+        f"Время первой фиксации ошибки: {state['first_seen_at']}",
+        f"Сколько прогонов подряд падает: {state['consecutive_runs']}",
+    ]
+
+    # Keep one logical alert per site/error type. Split only when the URL list
+    # exceeds Telegram's message-size limit.
+    messages: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        candidate = "\n".join([*current, line])
+        if current and len(candidate) > MAX_TELEGRAM_TEXT_LENGTH:
+            messages.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        messages.append("\n".join(current))
+    return messages
 
 
 def format_recovery(site: str, error_type: str, state: dict, checked_at: str) -> str:

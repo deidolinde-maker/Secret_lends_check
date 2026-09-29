@@ -4,7 +4,7 @@ from pathlib import Path
 import requests
 
 from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record
-from alerts import format_success_mini_report
+from alerts import format_group_alert, format_success_mini_report
 from alert_state import notification_due
 
 
@@ -103,3 +103,21 @@ def test_ssl_failure_is_not_reported_as_available_when_http_is_200():
     assert record["error_type"] == "SSL"
     assert record["availability"] == "FAILED"
     assert record["http_status_role"] == "DIAGNOSTIC_ONLY"
+
+
+def test_group_alert_contains_all_pages_for_one_site_and_error_type():
+    results = [
+        {"url": "https://example.com/one"},
+        {"url": "https://example.com/two"},
+    ]
+    messages = format_group_alert(
+        "example.com",
+        "HTTP_5XX",
+        results,
+        {"first_seen_at": "2026-09-29T10:00:00+00:00", "consecutive_runs": 1},
+        "2026-09-29T10:01:00+00:00",
+    )
+    assert len(messages) == 1
+    assert "Страницы с ошибкой (2):" in messages[0]
+    assert "https://example.com/one" in messages[0]
+    assert "https://example.com/two" in messages[0]

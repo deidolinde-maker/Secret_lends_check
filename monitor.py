@@ -364,9 +364,9 @@ def run_once(
         for result in site_results:
             if result.get("ssl_error"):
                 current_by_type.setdefault("SSL", []).append(result)
-            if result["classification"] != "OK":
+            elif result["classification"] != "OK":
                 current_by_type.setdefault(result["classification"], []).append(result)
-            if result.get("status_code") == 401:
+            if not result.get("ssl_error") and result.get("status_code") == 401:
                 current_by_type.setdefault("HTTP_401_POLICY", []).append(result)
 
         summary["policy_warnings"] += len(current_by_type.get("HTTP_401_POLICY", []))
