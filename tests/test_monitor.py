@@ -4,7 +4,7 @@ from pathlib import Path
 import requests
 
 from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record
-from alerts import format_group_alert, format_success_mini_report
+from alerts import MAX_TELEGRAM_TEXT_LENGTH, format_group_alert, format_success_mini_report
 from alert_state import notification_due
 
 
@@ -121,3 +121,18 @@ def test_group_alert_contains_all_pages_for_one_site_and_error_type():
     assert "Страницы с ошибкой (2):" in messages[0]
     assert "https://example.com/one" in messages[0]
     assert "https://example.com/two" in messages[0]
+
+
+def test_large_group_alert_uses_one_compact_domain_message():
+    results = [{"url": f"https://example.com/page-{index}"} for index in range(500)]
+    messages = format_group_alert(
+        "example.com",
+        "HTTP_5XX",
+        results,
+        {"first_seen_at": "2026-09-29T10:00:00+00:00", "consecutive_runs": 1},
+        "2026-09-29T10:01:00+00:00",
+    )
+    assert len(messages) == 1
+    assert len(messages[0]) < MAX_TELEGRAM_TEXT_LENGTH
+    assert "Все страницы домена вернули ошибку HTTP_5XX (500 страниц)" in messages[0]
+    assert "page-499" not in messages[0]

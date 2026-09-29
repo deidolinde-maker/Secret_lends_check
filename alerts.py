@@ -98,7 +98,7 @@ def format_policy_warning(site: str, results: list[dict], checked_at: str) -> st
 def format_group_alert(site: str, error_type: str, results: list[dict], state: dict, checked_at: str) -> list[str]:
     urls = [result["url"] for result in results]
     title = "❌ [ALERT] Проблема с SSL сертификатом🔒" if error_type == "SSL" else "❌ [ALERT] Ошибка проверки страниц"
-    lines = [
+    details = [
         title,
         f"Сайт: {site}",
         f"Тип ошибки: {error_type}",
@@ -109,20 +109,24 @@ def format_group_alert(site: str, error_type: str, results: list[dict], state: d
         f"Сколько прогонов подряд падает: {state['consecutive_runs']}",
     ]
 
-    # Keep one logical alert per site/error type. Split only when the URL list
-    # exceeds Telegram's message-size limit.
-    messages: list[str] = []
-    current: list[str] = []
-    for line in lines:
-        candidate = "\n".join([*current, line])
-        if current and len(candidate) > MAX_TELEGRAM_TEXT_LENGTH:
-            messages.append("\n".join(current))
-            current = [line]
-        else:
-            current.append(line)
-    if current:
-        messages.append("\n".join(current))
-    return messages
+    # Keep one logical alert per site/error type. If the URL list is too large,
+    # send one compact domain-level alert instead of several Telegram messages.
+    message = "\n".join(details)
+    if len(message) <= MAX_TELEGRAM_TEXT_LENGTH:
+        return [message]
+    return [
+        "\n".join(
+            [
+                title,
+                f"Сайт: {site}",
+                f"Все страницы домена вернули ошибку {error_type} ({len(urls)} страниц)",
+                "Список URL сокращён: сообщение превысило лимит Telegram.",
+                f"Время проверки: {checked_at}",
+                f"Время первой фиксации ошибки: {state['first_seen_at']}",
+                f"Сколько прогонов подряд падает: {state['consecutive_runs']}",
+            ]
+        )
+    ]
 
 
 def format_recovery(site: str, error_type: str, state: dict, checked_at: str) -> str:
