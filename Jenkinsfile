@@ -7,11 +7,15 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
     }
 
+    triggers {
+        cron('TZ=Europe/Moscow\nH 9,17 * * *')
+    }
+
     parameters {
         booleanParam(
             name: 'ALERTS_ENABLED',
             defaultValue: true,
-            description: 'Включить временные Telegram alerts через credentials Everyday Test'
+            description: 'Включить Telegram alerts через credentials Big Landing Test'
         )
         string(
             name: 'EXPECTED_PROXY_IP',
@@ -111,7 +115,7 @@ for name, bundle in checks:
                     string(credentialsId: 'Proxy_for_secret_lend', variable: 'PROXY_URL'),
                     string(credentialsId: 'telegram_proxy_url', variable: 'TELEGRAM_PROXY_URL'),
                     string(credentialsId: 'telegram_proxy_auth_secret', variable: 'TELEGRAM_PROXY_AUTH_SECRET'),
-                    string(credentialsId: 'tg_proxy_creds_survarius', variable: 'TELEGRAM_PROXY_CREDS')
+                    string(credentialsId: 'telegram_proxy_global_test', variable: 'TELEGRAM_PROXY_CREDS')
                 ]) {
                     withEnv([
                         "ALERTS_ENABLED=${params.ALERTS_ENABLED}",

@@ -4,8 +4,20 @@ from pathlib import Path
 import requests
 
 from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record
-from alerts import MAX_TELEGRAM_TEXT_LENGTH, format_group_alert, format_success_mini_report
-from alert_state import mark_notification_sent, notification_due, observe_error
+from alerts import (
+    MAX_TELEGRAM_TEXT_LENGTH,
+    format_group_alert,
+    format_scheduled_summary,
+    format_success_mini_report,
+)
+from alert_state import (
+    mark_notification_sent,
+    mark_summary_sent,
+    notification_due,
+    observe_error,
+    summary_due,
+    summary_slot,
+)
 
 
 def test_load_targets_rejects_duplicate_urls(tmp_path: Path):
@@ -85,6 +97,40 @@ def test_notification_schedule_is_one_four_twelve_then_24_hours():
     assert notification_due(12, "2026-09-29T10:00:00+00:00", "2026-09-29T10:20:00+00:00")
     assert not notification_due(13, "2026-09-29T10:00:00+00:00", "2026-09-30T09:59:00+00:00")
     assert notification_due(13, "2026-09-29T10:00:00+00:00", "2026-09-30T10:00:00+00:00")
+
+
+def test_summary_slots_use_moscow_time_and_run_only_twice_daily():
+    assert summary_slot("2026-09-30T06:00:00+00:00") == "2026-09-30-09"
+    assert summary_slot("2026-09-30T14:00:00+00:00") == "2026-09-30-17"
+    assert summary_slot("2026-09-30T10:00:00+00:00") is None
+
+
+def test_summary_slot_is_marked_only_after_delivery():
+    state = {}
+    slot = "2026-09-30-09"
+    assert summary_due(state, slot)
+    mark_summary_sent(state, slot=slot, sent_at="2026-09-30T06:15:00+00:00")
+    assert not summary_due(state, slot)
+    assert summary_due(state, "2026-09-30-17")
+
+
+def test_scheduled_summary_contains_counts_and_period():
+    report = format_scheduled_summary(
+        {
+            "total": 689,
+            "passed": 620,
+            "failed": 0,
+            "ssl_errors": 0,
+            "policy_warnings": 69,
+            "started_at": "2026-09-30T06:00:00+00:00",
+            "duration_ms": 1234,
+        },
+        "2026-09-30-09",
+    )
+    assert "Период: 09:00 МСК" in report
+    assert "Проверено страниц: 689" in report
+    assert "Успешно: 620" in report
+    assert "Предупреждений policy (HTTP 401): 69" in report
 
 
 def test_ssl_failure_is_not_reported_as_available_when_http_is_200():

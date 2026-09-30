@@ -16,12 +16,21 @@ from urllib.parse import urlparse
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
-from alert_state import close_error, load_state, mark_notification_sent, observe_error, save_state
+from alert_state import (
+    close_error,
+    load_state,
+    mark_notification_sent,
+    mark_summary_sent,
+    observe_error,
+    save_state,
+    summary_due,
+    summary_slot,
+)
 from alerts import (
     format_group_alert,
     format_policy_warning,
     format_recovery,
-    format_success_mini_report,
+    format_scheduled_summary,
     sender_from_env,
 )
 
@@ -413,8 +422,14 @@ def run_once(
         save_state(alert_state_file, state)
     summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
     if sender:
-        if summary["failed"] == 0 and summary["ssl_errors"] == 0 and summary["policy_warnings"] == 0:
-            sender.send(format_success_mini_report(summary))
+        slot = summary_slot(started_at)
+        if summary_due(state, slot):
+            if sender.send(format_scheduled_summary(summary, slot)):
+                mark_summary_sent(state, slot=slot, sent_at=started_at)
+                save_state(alert_state_file, state)
+                LOGGER.info("Scheduled Telegram summary delivered: slot=%s", slot)
+            else:
+                LOGGER.warning("Scheduled Telegram summary was not delivered; slot remains due: %s", slot)
     return summary
 
 

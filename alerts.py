@@ -155,3 +155,20 @@ def format_success_mini_report(summary: dict) -> str:
             f"Длительность прогона: {summary['duration_ms']} мс",
         ]
     )
+
+
+def format_scheduled_summary(summary: dict, slot: str) -> str:
+    period = "09:00" if slot.endswith("-09") else "17:00"
+    return "\n".join(
+        [
+            "📊 Саммари проверки лендингов",
+            f"Период: {period} МСК",
+            f"Проверено страниц: {summary['total']}",
+            f"Успешно: {summary['passed']}",
+            f"Ошибок: {summary['failed']}",
+            f"Предупреждений policy (HTTP 401): {summary.get('policy_warnings', 0)}",
+            f"SSL-проблем: {summary['ssl_errors']}",
+            f"Время проверки: {summary['started_at']}",
+            f"Длительность прогона: {summary['duration_ms']} мс",
+        ]
+    )

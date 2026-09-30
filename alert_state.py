@@ -4,6 +4,11 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+
+SUMMARY_STATE_KEY = "__summary__"
+MOSCOW_ZONE = ZoneInfo("Europe/Moscow")
 
 
 def load_state(path: str | Path) -> dict[str, dict[str, Any]]:
@@ -87,3 +92,24 @@ def close_error(state: dict[str, dict[str, Any]], *, site: str, error_type: str)
     key = state_key(site, error_type)
     previous = state.pop(key, None)
     return previous if previous and previous.get("active") else None
+
+
+def summary_slot(started_at: str) -> str | None:
+    """Return the Moscow summary slot for a run starting at 09:00 or 17:00."""
+    try:
+        current = datetime.fromisoformat(started_at).astimezone(MOSCOW_ZONE)
+    except ValueError:
+        return None
+    if current.hour not in {9, 17}:
+        return None
+    return current.strftime("%Y-%m-%d-%H")
+
+
+def summary_due(state: dict[str, dict[str, Any]], slot: str | None) -> bool:
+    if not slot:
+        return False
+    return state.get(SUMMARY_STATE_KEY, {}).get("last_slot") != slot
+
+
+def mark_summary_sent(state: dict[str, dict[str, Any]], *, slot: str, sent_at: str) -> None:
+    state[SUMMARY_STATE_KEY] = {"last_slot": slot, "last_sent_at": sent_at}
