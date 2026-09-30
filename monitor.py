@@ -18,13 +18,15 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 from alert_state import (
     close_error,
+    add_summary_run,
+    get_summary_period,
     load_state,
     mark_notification_sent,
-    mark_summary_sent,
+    mark_summary_period_sent,
     observe_error,
     save_state,
-    summary_due,
-    summary_slot,
+    pending_summary_periods,
+    summary_period,
 )
 from alerts import (
     format_group_alert,
@@ -339,6 +341,16 @@ def run_once(
     state = load_state(alert_state_file)
     if sender is None:
         LOGGER.warning("Telegram alerts are disabled or unavailable; no alert messages will be sent")
+    current_period = summary_period(started_at)
+    if sender:
+        for pending_period in pending_summary_periods(state, current_period):
+            aggregate = get_summary_period(state, pending_period)
+            if aggregate and sender.send(format_scheduled_summary(aggregate, pending_period)):
+                mark_summary_period_sent(state, period=pending_period, sent_at=started_at)
+                save_state(alert_state_file, state)
+                LOGGER.info("Aggregated Telegram summary delivered: period=%s", pending_period)
+            else:
+                LOGGER.warning("Aggregated Telegram summary was not delivered; period remains due: %s", pending_period)
     grouped: dict[str, list[UrlTarget]] = {}
     for target in targets:
         grouped.setdefault(target.site, []).append(target)
@@ -421,15 +433,8 @@ def run_once(
                     sender.send(format_recovery(site, error_type, closed, started_at))
         save_state(alert_state_file, state)
     summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
-    if sender:
-        slot = summary_slot(started_at)
-        if summary_due(state, slot):
-            if sender.send(format_scheduled_summary(summary, slot)):
-                mark_summary_sent(state, slot=slot, sent_at=started_at)
-                save_state(alert_state_file, state)
-                LOGGER.info("Scheduled Telegram summary delivered: slot=%s", slot)
-            else:
-                LOGGER.warning("Scheduled Telegram summary was not delivered; slot remains due: %s", slot)
+    add_summary_run(state, period=current_period, summary=summary)
+    save_state(alert_state_file, state)
     return summary
 
 

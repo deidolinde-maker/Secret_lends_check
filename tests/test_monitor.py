@@ -127,7 +127,7 @@ def test_scheduled_summary_contains_counts_and_period():
         },
         "2026-09-30-09",
     )
-    assert "Период: 09:00 МСК" in report
+    assert "Период: 09:00–17:00 МСК" in report
     assert "Проверено страниц: 689" in report
     assert "Успешно: 620" in report
     assert "Предупреждений policy (HTTP 401): 69" in report

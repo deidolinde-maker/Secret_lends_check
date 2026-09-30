@@ -113,3 +113,57 @@ def summary_due(state: dict[str, dict[str, Any]], slot: str | None) -> bool:
 
 def mark_summary_sent(state: dict[str, dict[str, Any]], *, slot: str, sent_at: str) -> None:
     state[SUMMARY_STATE_KEY] = {"last_slot": slot, "last_sent_at": sent_at}
+
+
+def summary_period(started_at: str) -> str:
+    """Return the Moscow aggregation period containing a run."""
+    current = datetime.fromisoformat(started_at).astimezone(MOSCOW_ZONE)
+    if 9 <= current.hour < 17:
+        return current.strftime("%Y-%m-%d-09")
+    if current.hour >= 17:
+        return current.strftime("%Y-%m-%d-17")
+    previous_day = current.date() - timedelta(days=1)
+    return f"{previous_day:%Y-%m-%d}-17"
+
+
+def add_summary_run(state: dict[str, dict[str, Any]], *, period: str, summary: dict[str, Any]) -> None:
+    summary_state = state.setdefault(SUMMARY_STATE_KEY, {})
+    periods = summary_state.setdefault("periods", {})
+    aggregate = periods.setdefault(
+        period,
+        {
+            "runs": 0,
+            "total": 0,
+            "passed": 0,
+            "failed": 0,
+            "broken": 0,
+            "skipped": 0,
+            "ssl_errors": 0,
+            "policy_warnings": 0,
+            "duration_ms": 0,
+            "started_at": summary["started_at"],
+            "last_started_at": summary["started_at"],
+        },
+    )
+    for key in ("runs", "total", "passed", "failed", "broken", "skipped", "ssl_errors", "policy_warnings", "duration_ms"):
+        aggregate[key] += 1 if key == "runs" else int(summary.get(key, 0))
+    aggregate["last_started_at"] = summary["started_at"]
+
+
+def pending_summary_periods(state: dict[str, dict[str, Any]], current_period: str) -> list[str]:
+    periods = state.get(SUMMARY_STATE_KEY, {}).get("periods", {})
+    return sorted(period for period in periods if period != current_period)
+
+
+def get_summary_period(state: dict[str, dict[str, Any]], period: str) -> dict[str, Any] | None:
+    periods = state.get(SUMMARY_STATE_KEY, {}).get("periods", {})
+    value = periods.get(period)
+    return value if isinstance(value, dict) else None
+
+
+def mark_summary_period_sent(state: dict[str, dict[str, Any]], *, period: str, sent_at: str) -> None:
+    summary_state = state.setdefault(SUMMARY_STATE_KEY, {})
+    periods = summary_state.setdefault("periods", {})
+    periods.pop(period, None)
+    summary_state["last_sent_period"] = period
+    summary_state["last_sent_at"] = sent_at
