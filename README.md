@@ -47,6 +47,8 @@ Proxy_for_secret_lend
 telegram_proxy_url          # proxy endpoint
 telegram_proxy_auth_secret  # proxy auth secret
 telegram_proxy_global_test  # Big Landing Test
+google-sheets-webhook-url   # Apps Script /exec URL
+google-sheets-webhook-token # Apps Script MONITOR_TOKEN
 ```
 
 Для публикации Allure в Jenkins должен быть установлен Allure Jenkins plugin. Если plugin ещё не установлен, build всё равно сохранит `allure-results` как artifact, но шаг публикации потребуется включить после установки plugin.

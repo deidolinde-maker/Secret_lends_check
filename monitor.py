@@ -35,6 +35,7 @@ from alerts import (
     format_scheduled_summary,
     sender_from_env,
 )
+from sheets_webhook import error_rows, webhook_from_env
 
 
 LOGGER = logging.getLogger("secret_landings")
@@ -338,6 +339,7 @@ def run_once(
     targets = load_targets(urls_file)
     proxies = proxy_mapping(proxy_url)
     sender = sender_from_env()
+    sheets_webhook = webhook_from_env(proxy_url)
     state = load_state(alert_state_file)
     if sender is None:
         LOGGER.warning("Telegram alerts are disabled or unavailable; no alert messages will be sent")
@@ -433,6 +435,12 @@ def run_once(
                     sender.send(format_recovery(site, error_type, closed, started_at))
         save_state(alert_state_file, state)
     summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
+    run_id = uuid.uuid4().hex
+    table_rows = error_rows(summary, run_id=run_id)
+    summary["run_id"] = run_id
+    summary["table_rows"] = len(table_rows)
+    if sheets_webhook and not sheets_webhook.append_rows(table_rows):
+        LOGGER.error("Google Sheets write failed; monitor result remains available in Allure and logs")
     add_summary_run(state, period=current_period, summary=summary)
     save_state(alert_state_file, state)
     return summary

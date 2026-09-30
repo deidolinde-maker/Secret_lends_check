@@ -116,7 +116,9 @@ for name, bundle in checks:
                     string(credentialsId: 'Proxy_for_secret_lend', variable: 'PROXY_URL'),
                     string(credentialsId: 'telegram_proxy_url', variable: 'TELEGRAM_PROXY_URL'),
                     string(credentialsId: 'telegram_proxy_auth_secret', variable: 'TELEGRAM_PROXY_AUTH_SECRET'),
-                    string(credentialsId: 'telegram_proxy_global_test', variable: 'TELEGRAM_PROXY_CREDS')
+                    string(credentialsId: 'telegram_proxy_global_test', variable: 'TELEGRAM_PROXY_CREDS'),
+                    string(credentialsId: 'google-sheets-webhook-url', variable: 'SHEETS_WEBHOOK_URL'),
+                    string(credentialsId: 'google-sheets-webhook-token', variable: 'SHEETS_WEBHOOK_TOKEN')
                 ]) {
                     withEnv([
                         "ALERTS_ENABLED=${params.ALERTS_ENABLED}",
