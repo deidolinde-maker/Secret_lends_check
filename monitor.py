@@ -482,7 +482,7 @@ def run_once(
         save_state(alert_state_file, state)
     summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
     run_id = uuid.uuid4().hex
-    table_rows = error_rows(summary, run_id=run_id)
+    table_rows = error_rows(summary, run_id=run_id, state=state)
     summary["run_id"] = run_id
     summary["table_rows"] = len(table_rows)
     if sheets_webhook and not sheets_webhook.append_rows(table_rows):

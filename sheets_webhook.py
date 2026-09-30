@@ -22,7 +22,7 @@ def _moscow_time(value: str) -> str:
         return value
 
 
-def error_rows(summary: dict[str, Any], *, run_id: str) -> list[dict[str, Any]]:
+def error_rows(summary: dict[str, Any], *, run_id: str, state: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for result in summary.get("results", []):
         common = {
@@ -35,22 +35,31 @@ def error_rows(summary: dict[str, Any], *, run_id: str) -> list[dict[str, Any]]:
             "consecutive_runs": "",
         }
         if result.get("ssl_error"):
+            series = (state or {}).get(f"{result.get('site', '')}||{result.get('url', '')}||SSL", {})
             rows.append(
                 {
                     **common,
                     "error_type": "SSL",
                     "http_status": "SSL",
                     "ssl_error": result.get("ssl_error", ""),
+                    "first_seen_at": series.get("first_seen_at", ""),
+                    "consecutive_runs": series.get("consecutive_runs", ""),
                 }
             )
         classification = result.get("classification")
         if classification in ERROR_TYPES:
+            series = (state or {}).get(
+                f"{result.get('site', '')}||{result.get('url', '')}||{classification}",
+                {},
+            )
             rows.append(
                 {
                     **common,
                     "error_type": classification,
                     "http_status": result.get("status_code") or classification,
                     "ssl_error": "",
+                    "first_seen_at": series.get("first_seen_at", ""),
+                    "consecutive_runs": series.get("consecutive_runs", ""),
                 }
             )
     return rows
