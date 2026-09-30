@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import socket
 import ssl
 import time
@@ -30,6 +31,7 @@ from alert_state import (
 )
 from alerts import (
     format_group_alert,
+    format_critical_alert,
     format_policy_warning,
     format_recovery,
     format_scheduled_summary,
@@ -181,6 +183,16 @@ def result_record(site: str, result: HttpResult, checked_at: str) -> dict[str, A
     return record
 
 
+def _state_urls(state: dict[str, dict[str, Any]], site: str, error_type: str) -> list[str]:
+    urls: list[str] = []
+    prefix = f"{site}||"
+    for key in state:
+        parts = key.split("||")
+        if key.startswith(prefix) and len(parts) == 3 and parts[2] == error_type:
+            urls.append(parts[1])
+    return urls
+
+
 def probe_url(
     target: UrlTarget,
     proxies: dict[str, str],
@@ -303,6 +315,7 @@ def run_once(
     max_redirects: int = 10,
     preflight_attempts: int = 3,
     alert_state_file: str | Path = "alert_state.json",
+    target_site: str = "",
 ) -> dict[str, Any]:
     run_started = time.perf_counter()
     started_at = utc_now()
@@ -337,6 +350,10 @@ def run_once(
         return summary
 
     targets = load_targets(urls_file)
+    if target_site:
+        targets = [target for target in targets if target.site == target_site]
+        if not targets:
+            raise ValueError(f"Target site was not found in URL config: {target_site}")
     proxies = proxy_mapping(proxy_url)
     sender = sender_from_env()
     sheets_webhook = webhook_from_env(proxy_url)
@@ -347,7 +364,9 @@ def run_once(
     if sender:
         for pending_period in pending_summary_periods(state, current_period):
             aggregate = get_summary_period(state, pending_period)
-            if aggregate and sender.send(format_scheduled_summary(aggregate, pending_period)):
+            if aggregate and sender.send(
+                format_scheduled_summary(aggregate, pending_period, os.getenv("SHEETS_REPORT_URL", ""))
+            ):
                 mark_summary_period_sent(state, period=pending_period, sent_at=started_at)
                 save_state(alert_state_file, state)
                 LOGGER.info("Aggregated Telegram summary delivered: period=%s", pending_period)
@@ -395,31 +414,62 @@ def run_once(
                 current_by_type.setdefault("HTTP_401_POLICY", []).append(result)
 
         summary["policy_warnings"] += len(current_by_type.get("HTTP_401_POLICY", []))
-        known_types = {key.split("||", 1)[1] for key in state if key.startswith(f"{site}||")}
+        known_types = {
+            key.rsplit("||", 1)[1]
+            for key in state
+            if key.startswith(f"{site}||") and len(key.split("||")) == 3
+        }
         for error_type in sorted(known_types | set(current_by_type)):
             current_results = current_by_type.get(error_type, [])
+            current_urls = {item["url"] for item in current_results}
+            recovered: list[dict[str, Any]] = []
+            for old_url in _state_urls(state, site, error_type):
+                if old_url not in current_urls:
+                    closed = close_error(state, site=site, url=old_url, error_type=error_type)
+                    if closed:
+                        recovered.append(closed)
+
+            if recovered and sender and error_type != "HTTP_401_POLICY":
+                sender.send(format_recovery(site, error_type, recovered, started_at))
+
             if current_results:
-                series, due = observe_error(
-                    state,
-                    site=site,
-                    error_type=error_type,
-                    urls=[item["url"] for item in current_results],
-                    started_at=started_at,
-                )
-                if sender and due:
+                due_series: list[dict[str, Any]] = []
+                for result in current_results:
+                    series, due = observe_error(
+                        state,
+                        site=site,
+                        url=result["url"],
+                        error_type=error_type,
+                        started_at=started_at,
+                    )
+                    if due:
+                        due_series.append(series)
+                if sender and due_series:
+                    aggregate_state = {
+                        "first_seen_at": min(item["first_seen_at"] for item in due_series),
+                        "consecutive_runs": max(item["consecutive_runs"] for item in due_series),
+                    }
+                    all_pages_same_error = (
+                        error_type in {"HTTP_404", "HTTP_5XX", "NO_CONNECTION"}
+                        and len(current_results) == len(site_targets)
+                    )
                     if error_type == "HTTP_401_POLICY":
                         delivered = sender.send(format_policy_warning(site, current_results, started_at))
+                    elif all_pages_same_error:
+                        delivered = sender.send(format_critical_alert(site, error_type, current_results, aggregate_state, started_at))
                     else:
                         delivered = True
-                        for message in format_group_alert(site, error_type, current_results, series, started_at):
+                        for message in format_group_alert(site, error_type, current_results, aggregate_state, started_at):
                             delivered = sender.send(message) and delivered
                     if delivered:
-                        mark_notification_sent(
-                            state,
-                            site=site,
-                            error_type=error_type,
-                            notified_at=started_at,
-                        )
+                        for series in due_series:
+                            mark_notification_sent(
+                                state,
+                                site=site,
+                                url=series["url"],
+                                error_type=error_type,
+                                notified_at=started_at,
+                            )
                         LOGGER.info("Telegram alert delivered: site=%s error_type=%s", site, error_type)
                     else:
                         LOGGER.warning(
@@ -427,12 +477,8 @@ def run_once(
                             site,
                             error_type,
                         )
-                elif due:
+                elif due_series:
                     LOGGER.warning("Telegram alert is due but sender is unavailable: site=%s error_type=%s", site, error_type)
-            else:
-                closed = close_error(state, site=site, error_type=error_type)
-                if sender and closed and error_type != "HTTP_401_POLICY":
-                    sender.send(format_recovery(site, error_type, closed, started_at))
         save_state(alert_state_file, state)
     summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
     run_id = uuid.uuid4().hex
@@ -456,6 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-redirects", type=int, default=10)
     parser.add_argument("--preflight-attempts", type=int, default=3)
     parser.add_argument("--alert-state-file", default="alert_state.json")
+    parser.add_argument("--site", default="", help="Check only one configured site")
     return parser
 
 
@@ -471,6 +518,7 @@ def main() -> int:
         max_redirects=args.max_redirects,
         preflight_attempts=args.preflight_attempts,
         alert_state_file=args.alert_state_file,
+        target_site=args.site,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary["proxy_preflight"]["ok"] else 2

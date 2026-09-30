@@ -27,8 +27,8 @@ def save_state(path: str | Path, state: dict[str, dict[str, Any]]) -> None:
     temporary.replace(state_path)
 
 
-def state_key(site: str, error_type: str) -> str:
-    return f"{site}||{error_type}"
+def state_key(site: str, url: str, error_type: str) -> str:
+    return f"{site}||{url}||{error_type}"
 
 
 def notification_due(consecutive_runs: int, last_notified_at: str | None, started_at: str) -> bool:
@@ -48,11 +48,11 @@ def observe_error(
     state: dict[str, dict[str, Any]],
     *,
     site: str,
+    url: str,
     error_type: str,
-    urls: list[str],
     started_at: str,
 ) -> tuple[dict[str, Any], bool]:
-    key = state_key(site, error_type)
+    key = state_key(site, url, error_type)
     previous = state.get(key, {})
     consecutive = int(previous.get("consecutive_runs", 0)) + 1
     first_seen = previous.get("first_seen_at", started_at)
@@ -69,7 +69,7 @@ def observe_error(
         # Notification time is updated only after Telegram confirms delivery.
         "last_notified_at": previous.get("last_notified_at"),
         "notification_delivered": previous.get("notification_delivered", False),
-        "last_urls": sorted(urls),
+        "url": url,
     }
     state[key] = current
     return current, due
@@ -79,17 +79,18 @@ def mark_notification_sent(
     state: dict[str, dict[str, Any]],
     *,
     site: str,
+    url: str,
     error_type: str,
     notified_at: str,
 ) -> None:
-    entry = state.get(state_key(site, error_type))
+    entry = state.get(state_key(site, url, error_type))
     if entry is not None:
         entry["last_notified_at"] = notified_at
         entry["notification_delivered"] = True
 
 
-def close_error(state: dict[str, dict[str, Any]], *, site: str, error_type: str) -> dict[str, Any] | None:
-    key = state_key(site, error_type)
+def close_error(state: dict[str, dict[str, Any]], *, site: str, url: str, error_type: str) -> dict[str, Any] | None:
+    key = state_key(site, url, error_type)
     previous = state.pop(key, None)
     return previous if previous and previous.get("active") else None
 
@@ -141,12 +142,22 @@ def add_summary_run(state: dict[str, dict[str, Any]], *, period: str, summary: d
             "ssl_errors": 0,
             "policy_warnings": 0,
             "duration_ms": 0,
+            "problem_urls": [],
+            "ssl_urls": [],
             "started_at": summary["started_at"],
             "last_started_at": summary["started_at"],
         },
     )
+    aggregate.setdefault("problem_urls", [])
+    aggregate.setdefault("ssl_urls", [])
     for key in ("runs", "total", "passed", "failed", "broken", "skipped", "ssl_errors", "policy_warnings", "duration_ms"):
         aggregate[key] += 1 if key == "runs" else int(summary.get(key, 0))
+    for result in summary.get("results", []):
+        url = result.get("url")
+        if result.get("classification") in {"HTTP_404", "HTTP_5XX", "TIMEOUT", "NO_CONNECTION"} and url not in aggregate["problem_urls"]:
+            aggregate["problem_urls"].append(url)
+        if result.get("ssl_error") and url not in aggregate["ssl_urls"]:
+            aggregate["ssl_urls"].append(url)
     aggregate["last_started_at"] = summary["started_at"]
 
 

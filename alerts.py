@@ -4,6 +4,7 @@ import html
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import requests
 
@@ -130,15 +131,31 @@ def format_group_alert(site: str, error_type: str, results: list[dict], state: d
     ]
 
 
-def format_recovery(site: str, error_type: str, state: dict, checked_at: str) -> str:
-    urls = state.get("last_urls", [])
+def format_recovery(site: str, error_type: str, states: list[dict], checked_at: str) -> str:
+    urls = [state.get("url", "") for state in states if state.get("url")]
+    lines = [
+        "✅ [ALERT] Ошибка восстановлена",
+        f"Сайт: {site}",
+        f"Тип ошибки: {error_type}",
+        f"Восстановлено страниц: {len(urls)}",
+    ]
+    lines.extend(f"- {url}" for url in urls[:20])
+    if len(urls) > 20:
+        lines.append("Список URL сокращён.")
+    lines.append(f"Время проверки: {checked_at}")
+    return "\n".join(lines)
+
+
+def format_critical_alert(site: str, error_type: str, results: list[dict], state: dict, checked_at: str) -> str:
     return "\n".join(
         [
-            "✅ [ALERT] Ошибка восстановлена",
+            "🚨 [CRITICAL] Ошибка доступа ко всем страницам на лендинге",
             f"Сайт: {site}",
             f"Тип ошибки: {error_type}",
-            f"Восстановлено страниц: {len(urls)}",
+            f"Все страницы вернули ошибку: {len(results)}",
             f"Время проверки: {checked_at}",
+            f"Время первой фиксации ошибки: {state['first_seen_at']}",
+            f"Сколько прогонов подряд падает: {state['consecutive_runs']}",
         ]
     )
 
@@ -157,19 +174,24 @@ def format_success_mini_report(summary: dict) -> str:
     )
 
 
-def format_scheduled_summary(summary: dict, slot: str) -> str:
-    period = "09:00–17:00" if slot.endswith("-09") else "17:00–09:00"
+def format_scheduled_summary(summary: dict, slot: str, report_url: str = "") -> str:
+    date = datetime.fromisoformat(slot[:10]).date()
+    if slot.endswith("-09"):
+        period = f"{date - timedelta(days=1)} 17:00 — {date} 09:00"
+    else:
+        period = f"{date} 09:00 — {date} 17:00"
+    problem_count = len(summary.get("problem_urls", []))
+    ssl_count = len(summary.get("ssl_urls", []))
     return "\n".join(
         [
-            "📊 Саммари проверки лендингов",
+            f"📊 Отчет за период — лендинги (Секретные)",
             f"Период: {period} МСК",
             f"Завершено прогонов: {summary.get('runs', 1)}",
             f"Проверено страниц: {summary['total']}",
             f"Успешно: {summary.get('passed', 0)}",
-            f"Ошибок: {summary['failed']}",
+            f"Проблемных страниц: {problem_count}",
             f"Предупреждений policy (HTTP 401): {summary.get('policy_warnings', 0)}",
-            f"SSL-проблем: {summary['ssl_errors']}",
-            f"Время проверки: {summary['started_at']}",
-            f"Длительность прогона: {summary['duration_ms']} мс",
+            f"SSL-проблем на сайтах: {ssl_count}",
+            *([f"Ссылка на отчет: {report_url}"] if report_url else []),
         ]
     )

@@ -6,6 +6,7 @@ import requests
 from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record
 from alerts import (
     MAX_TELEGRAM_TEXT_LENGTH,
+    format_critical_alert,
     format_group_alert,
     format_scheduled_summary,
     format_success_mini_report,
@@ -127,7 +128,7 @@ def test_scheduled_summary_contains_counts_and_period():
         },
         "2026-09-30-09",
     )
-    assert "Период: 09:00–17:00 МСК" in report
+    assert "Период: 2026-09-30 09:00 — 2026-09-30 17:00 МСК" in report
     assert "Проверено страниц: 689" in report
     assert "Успешно: 620" in report
     assert "Предупреждений policy (HTTP 401): 69" in report
@@ -169,6 +170,18 @@ def test_group_alert_contains_all_pages_for_one_site_and_error_type():
     assert "https://example.com/two" in messages[0]
 
 
+def test_critical_alert_is_available_for_all_pages_same_http_error():
+    message = format_critical_alert(
+        "example.com",
+        "HTTP_404",
+        [{"url": "https://example.com/one"}, {"url": "https://example.com/two"}],
+        {"first_seen_at": "2026-09-29T10:00:00+00:00", "consecutive_runs": 1},
+        "2026-09-29T10:01:00+00:00",
+    )
+    assert "[CRITICAL]" in message
+    assert "Все страницы вернули ошибку: 2" in message
+
+
 def test_large_group_alert_uses_one_compact_domain_message():
     results = [{"url": f"https://example.com/page-{index}"} for index in range(500)]
     messages = format_group_alert(
@@ -189,8 +202,8 @@ def test_notification_is_marked_only_after_delivery():
     series, due = observe_error(
         state,
         site="example.com",
+        url="https://example.com",
         error_type="HTTP_5XX",
-        urls=["https://example.com"],
         started_at="2026-09-29T10:00:00+00:00",
     )
     assert due is True
@@ -199,8 +212,9 @@ def test_notification_is_marked_only_after_delivery():
     mark_notification_sent(
         state,
         site="example.com",
+        url="https://example.com",
         error_type="HTTP_5XX",
         notified_at="2026-09-29T10:00:01+00:00",
     )
-    assert state["example.com||HTTP_5XX"]["last_notified_at"] == "2026-09-29T10:00:01+00:00"
-    assert state["example.com||HTTP_5XX"]["notification_delivered"] is True
+    assert state["example.com||https://example.com||HTTP_5XX"]["last_notified_at"] == "2026-09-29T10:00:01+00:00"
+    assert state["example.com||https://example.com||HTTP_5XX"]["notification_delivered"] is True

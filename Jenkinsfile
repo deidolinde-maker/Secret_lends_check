@@ -4,7 +4,7 @@ pipeline {
     options {
         disableConcurrentBuilds(abortPrevious: false)
         timestamps()
-        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '20'))
+        buildDiscarder(logRotator(daysToKeepStr: '30', artifactDaysToKeepStr: '7'))
     }
 
     parameters {
@@ -17,6 +17,11 @@ pipeline {
             name: 'CHAIN_NEXT_RUN',
             defaultValue: true,
             description: 'После завершения ставить следующий прогон через 10 минут'
+        )
+        string(
+            name: 'TARGET_SITE',
+            defaultValue: '',
+            description: 'Проверить только этот site из JSON; пусто — все сайты'
         )
         string(
             name: 'EXPECTED_PROXY_IP',
@@ -38,6 +43,8 @@ pipeline {
     environment {
         PYTHONUNBUFFERED = '1'
         PYTHON_BIN = 'python3'
+        PIP_CACHE_DIR = '/var/lib/jenkins/secret_lends_check/pip-cache'
+        SHEETS_REPORT_URL = 'https://docs.google.com/spreadsheets/d/13domluVIULqjjGPBqcrFPCjf0V-4_55Li3-qnTItAGQ/edit?usp=sharing'
     }
 
     stages {
@@ -53,10 +60,11 @@ pipeline {
                     set -eu
                     rm -rf allure-results
                     mkdir -p allure-results
+                    mkdir -p "$PIP_CACHE_DIR"
                     "$PYTHON_BIN" -m venv .venv
-                    .venv/bin/python -m pip install --upgrade pip
-                    .venv/bin/pip install -r requirements.txt
-                    .venv/bin/pip install --upgrade certifi
+                    .venv/bin/python -m pip install --cache-dir "$PIP_CACHE_DIR" --upgrade pip
+                    .venv/bin/pip install --cache-dir "$PIP_CACHE_DIR" -r requirements.txt
+                    .venv/bin/pip install --cache-dir "$PIP_CACHE_DIR" --upgrade certifi
                     .venv/bin/python -c 'import certifi; print("CA bundle:", certifi.where())'
                 '''
             }
@@ -136,6 +144,7 @@ for name, bundle in checks:
                               --timeout "$HTTP_TIMEOUT_SECONDS" \\
                               --max-redirects "$REDIRECT_MAX_HOPS" \\
                               --preflight-attempts 3 \\
+                              --site "$TARGET_SITE" \\
                               --alert-state-file /var/lib/jenkins/secret_lends_check/alert_state.json
                         '''
                     }
@@ -164,6 +173,7 @@ for name, bundle in checks:
                         parameters: [
                             booleanParam(name: 'ALERTS_ENABLED', value: params.ALERTS_ENABLED),
                             booleanParam(name: 'CHAIN_NEXT_RUN', value: params.CHAIN_NEXT_RUN),
+                            string(name: 'TARGET_SITE', value: params.TARGET_SITE),
                             string(name: 'EXPECTED_PROXY_IP', value: params.EXPECTED_PROXY_IP),
                             string(name: 'HTTP_TIMEOUT_SECONDS', value: params.HTTP_TIMEOUT_SECONDS),
                             string(name: 'REDIRECT_MAX_HOPS', value: params.REDIRECT_MAX_HOPS)
