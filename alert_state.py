@@ -16,7 +16,21 @@ def load_state(path: str | Path) -> dict[str, dict[str, Any]]:
     if not state_path.exists():
         return {}
     data = json.loads(state_path.read_text(encoding="utf-8"))
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    migrated: dict[str, dict[str, Any]] = {}
+    for key, value in data.items():
+        parts = key.split("||")
+        if len(parts) == 2 and isinstance(value, dict) and isinstance(value.get("last_urls"), list):
+            site, error_type = parts
+            for url in value["last_urls"]:
+                entry = dict(value)
+                entry.pop("last_urls", None)
+                entry["url"] = url
+                migrated[state_key(site, str(url), error_type)] = entry
+        else:
+            migrated[key] = value
+    return migrated
 
 
 def save_state(path: str | Path, state: dict[str, dict[str, Any]]) -> None:

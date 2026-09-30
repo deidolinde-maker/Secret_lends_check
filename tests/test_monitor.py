@@ -12,6 +12,7 @@ from alerts import (
     format_success_mini_report,
 )
 from alert_state import (
+    load_state,
     mark_notification_sent,
     mark_summary_sent,
     notification_due,
@@ -30,6 +31,26 @@ def test_load_targets_rejects_duplicate_urls(tmp_path: Path):
         assert "Duplicate URL" in str(exc)
     else:
         raise AssertionError("duplicate URL was accepted")
+
+
+def test_load_state_migrates_legacy_site_error_state(tmp_path: Path):
+    path = tmp_path / "alert_state.json"
+    path.write_text(
+        json.dumps(
+            {
+                "example.com||HTTP_5XX": {
+                    "active": True,
+                    "last_urls": ["https://example.com/a", "https://example.com/b"],
+                    "consecutive_runs": 4,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = load_state(path)
+    assert "example.com||https://example.com/a||HTTP_5XX" in state
+    assert "example.com||https://example.com/b||HTTP_5XX" in state
+    assert state["example.com||https://example.com/a||HTTP_5XX"]["url"] == "https://example.com/a"
 
 
 def test_proxy_preflight_retries_three_times(monkeypatch):
