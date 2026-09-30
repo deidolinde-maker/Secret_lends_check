@@ -3,7 +3,7 @@ from pathlib import Path
 
 import requests
 
-from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record
+from monitor import HttpResult, UrlTarget, load_targets, proxy_preflight, probe_url, result_record, select_targets
 from alerts import (
     MAX_TELEGRAM_TEXT_LENGTH,
     format_critical_alert,
@@ -31,6 +31,34 @@ def test_load_targets_rejects_duplicate_urls(tmp_path: Path):
         assert "Duplicate URL" in str(exc)
     else:
         raise AssertionError("duplicate URL was accepted")
+
+
+def test_empty_target_site_selects_all_configured_targets():
+    targets = [
+        UrlTarget("site-a.example", "https://site-a.example/one"),
+        UrlTarget("site-b.example", "https://site-b.example/one"),
+    ]
+    assert select_targets(targets, "") == targets
+    assert select_targets(targets, "   ") == targets
+
+
+def test_target_site_selects_only_exact_site():
+    targets = [
+        UrlTarget("site-a.example", "https://site-a.example/one"),
+        UrlTarget("site-a.example", "https://site-a.example/two"),
+        UrlTarget("site-ab.example", "https://site-ab.example/one"),
+    ]
+    assert select_targets(targets, " site-a.example ") == targets[:2]
+
+
+def test_unknown_target_site_is_rejected():
+    targets = [UrlTarget("site-a.example", "https://site-a.example/one")]
+    try:
+        select_targets(targets, "missing.example")
+    except ValueError as exc:
+        assert "Target site was not found" in str(exc)
+    else:
+        raise AssertionError("unknown target site was accepted")
 
 
 def test_load_state_migrates_legacy_site_error_state(tmp_path: Path):

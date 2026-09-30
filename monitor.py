@@ -102,6 +102,17 @@ def load_targets(path: str | Path) -> list[UrlTarget]:
     return targets
 
 
+def select_targets(targets: list[UrlTarget], target_site: str = "") -> list[UrlTarget]:
+    """Return all configured targets unless an exact site filter was supplied."""
+    normalized_site = target_site.strip()
+    if not normalized_site:
+        return targets
+    selected = [target for target in targets if target.site == normalized_site]
+    if not selected:
+        raise ValueError(f"Target site was not found in URL config: {normalized_site}")
+    return selected
+
+
 def proxy_mapping(proxy_url: str) -> dict[str, str]:
     parsed = urlparse(proxy_url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -349,11 +360,7 @@ def run_once(
         summary["duration_ms"] = int(round((time.perf_counter() - run_started) * 1000))
         return summary
 
-    targets = load_targets(urls_file)
-    if target_site:
-        targets = [target for target in targets if target.site == target_site]
-        if not targets:
-            raise ValueError(f"Target site was not found in URL config: {target_site}")
+    targets = select_targets(load_targets(urls_file), target_site)
     proxies = proxy_mapping(proxy_url)
     sender = sender_from_env()
     sheets_webhook = webhook_from_env(proxy_url)

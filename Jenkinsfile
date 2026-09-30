@@ -135,6 +135,7 @@ for name, bundle in checks:
                     ]) {
                         sh '''
                             set -eu
+                            target_site="${TARGET_SITE-}"
                             rm -rf allure-results
                             mkdir -p /var/lib/jenkins/secret_lends_check
                             .venv/bin/python monitor.py \\
@@ -145,7 +146,7 @@ for name, bundle in checks:
                               --timeout "$HTTP_TIMEOUT_SECONDS" \\
                               --max-redirects "$REDIRECT_MAX_HOPS" \\
                               --preflight-attempts 3 \\
-                              --site "$TARGET_SITE" \\
+                              --site "$target_site" \\
                               --alert-state-file /var/lib/jenkins/secret_lends_check/alert_state.json
                         '''
                     }
@@ -174,7 +175,7 @@ for name, bundle in checks:
                         parameters: [
                             booleanParam(name: 'ALERTS_ENABLED', value: params.ALERTS_ENABLED),
                             booleanParam(name: 'CHAIN_NEXT_RUN', value: params.CHAIN_NEXT_RUN),
-                            string(name: 'TARGET_SITE', value: params.TARGET_SITE),
+                            string(name: 'TARGET_SITE', value: params.TARGET_SITE ?: ''),
                             string(name: 'EXPECTED_PROXY_IP', value: params.EXPECTED_PROXY_IP),
                             string(name: 'HTTP_TIMEOUT_SECONDS', value: params.HTTP_TIMEOUT_SECONDS),
                             string(name: 'REDIRECT_MAX_HOPS', value: params.REDIRECT_MAX_HOPS)
