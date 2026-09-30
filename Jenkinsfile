@@ -130,7 +130,8 @@ for name, bundle in checks:
                 ]) {
                     withEnv([
                         "ALERTS_ENABLED=${params.ALERTS_ENABLED}",
-                        "TELEGRAM_PROXY_TIMEOUT_SEC=15"
+                        "TELEGRAM_PROXY_TIMEOUT_SEC=15",
+                        "TARGET_SITE=${params.TARGET_SITE ?: ''}"
                     ]) {
                         sh '''
                             set -eu
