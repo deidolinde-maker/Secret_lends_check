@@ -16,7 +16,7 @@ pipeline {
         booleanParam(
             name: 'CHAIN_NEXT_RUN',
             defaultValue: true,
-            description: 'После завершения ставить следующий прогон через 10 минут'
+            description: 'После завершения ставить следующий прогон через 1 час'
         )
         string(
             name: 'TARGET_SITE',
@@ -171,7 +171,7 @@ for name, bundle in checks:
                 if (params.CHAIN_NEXT_RUN) {
                     build job: env.JOB_NAME,
                         wait: false,
-                        quietPeriod: 600,
+                        quietPeriod: 3600,
                         parameters: [
                             booleanParam(name: 'ALERTS_ENABLED', value: params.ALERTS_ENABLED),
                             booleanParam(name: 'CHAIN_NEXT_RUN', value: params.CHAIN_NEXT_RUN),
