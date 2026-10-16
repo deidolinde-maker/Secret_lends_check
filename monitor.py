@@ -8,7 +8,7 @@ import socket
 import ssl
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -68,6 +68,9 @@ class HttpResult:
     classification: str
     ssl_error: str | None = None
     error_detail: str | None = None
+    attempts: int = 1
+    attempt_errors: list[str] = field(default_factory=list)
+    retry_recovered: bool = False
 
 
 def utc_now() -> str:
@@ -210,41 +213,26 @@ def probe_url(
     *,
     timeout: float = 10,
     max_redirects: int = 10,
+    attempts: int = 2,
+    retry_delay: float = 0.5,
     session: requests.Session | None = None,
 ) -> HttpResult:
     if not proxies or not proxies.get("http") or not proxies.get("https"):
         raise ValueError("Explicit proxy mapping is required; direct connections are forbidden")
+    if attempts < 1:
+        raise ValueError("attempts must be greater than zero")
     client = _session_without_environment_proxy(session)
     client.max_redirects = max_redirects
     started = time.perf_counter()
-    ssl_error: str | None = None
-    try:
-        response = client.get(
-            target.url,
-            proxies=proxies,
-            timeout=timeout,
-            allow_redirects=True,
-            verify=True,
-        )
-        elapsed = int(round((time.perf_counter() - started) * 1000))
-        return HttpResult(
-            url=target.url,
-            final_url=response.url,
-            status_code=response.status_code,
-            response_ms=elapsed,
-            classification=_classification(response.status_code, None),
-        )
-    except requests.exceptions.SSLError as exc:
-        ssl_error = str(exc)
-        # SSL and HTTP are independent: retry without certificate verification
-        # strictly to obtain the final HTTP status, still through the proxy.
+    attempt_errors: list[str] = []
+    for attempt in range(1, attempts + 1):
         try:
             response = client.get(
                 target.url,
                 proxies=proxies,
                 timeout=timeout,
                 allow_redirects=True,
-                verify=False,
+                verify=True,
             )
             elapsed = int(round((time.perf_counter() - started) * 1000))
             return HttpResult(
@@ -253,33 +241,70 @@ def probe_url(
                 status_code=response.status_code,
                 response_ms=elapsed,
                 classification=_classification(response.status_code, None),
-                ssl_error=ssl_error,
+                attempts=attempt,
+                attempt_errors=attempt_errors,
+                retry_recovered=bool(attempt_errors),
             )
-        except Exception as retry_error:  # noqa: BLE001
+        except requests.exceptions.SSLError as exc:
+            ssl_error = str(exc)
+            # SSL and HTTP are independent: retry without certificate verification
+            # strictly to obtain the final HTTP status, still through the proxy.
+            try:
+                response = client.get(
+                    target.url,
+                    proxies=proxies,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=False,
+                )
+                elapsed = int(round((time.perf_counter() - started) * 1000))
+                return HttpResult(
+                    url=target.url,
+                    final_url=response.url,
+                    status_code=response.status_code,
+                    response_ms=elapsed,
+                    classification=_classification(response.status_code, None),
+                    ssl_error=ssl_error,
+                    attempts=attempt,
+                    attempt_errors=attempt_errors,
+                )
+            except Exception as retry_error:  # noqa: BLE001
+                elapsed = int(round((time.perf_counter() - started) * 1000))
+                return HttpResult(
+                    url=target.url,
+                    final_url=None,
+                    status_code=None,
+                    response_ms=elapsed,
+                    classification=_classification(None, retry_error),
+                    ssl_error=ssl_error,
+                    error_detail=str(retry_error),
+                    attempts=attempt,
+                    attempt_errors=attempt_errors,
+                )
+        except requests.TooManyRedirects as exc:
+            elapsed = int(round((time.perf_counter() - started) * 1000))
+            return HttpResult(target.url, None, None, elapsed, "TIMEOUT", error_detail=str(exc), attempts=attempt)
+        except Exception as exc:  # noqa: BLE001 - result must classify every URL
+            classification = _classification(None, exc)
+            diagnostic = f"attempt {attempt}/{attempts}: {type(exc).__name__}: {exc}"
+            attempt_errors.append(diagnostic)
+            LOGGER.warning("URL request failed: site=%s url=%s %s", target.site, target.url, diagnostic)
+            if attempt < attempts and classification in {"TIMEOUT", "NO_CONNECTION"}:
+                time.sleep(retry_delay)
+                continue
             elapsed = int(round((time.perf_counter() - started) * 1000))
             return HttpResult(
                 url=target.url,
                 final_url=None,
                 status_code=None,
                 response_ms=elapsed,
-                classification=_classification(None, retry_error),
-                ssl_error=ssl_error,
-                error_detail=str(retry_error),
+                classification=classification,
+                error_detail=str(exc),
+                attempts=attempt,
+                attempt_errors=attempt_errors,
             )
-    except requests.TooManyRedirects as exc:
-        elapsed = int(round((time.perf_counter() - started) * 1000))
-        return HttpResult(target.url, None, None, elapsed, "TIMEOUT", error_detail=str(exc))
-    except Exception as exc:  # noqa: BLE001 - result must classify every URL
-        elapsed = int(round((time.perf_counter() - started) * 1000))
-        return HttpResult(
-            url=target.url,
-            final_url=None,
-            status_code=None,
-            response_ms=elapsed,
-            classification=_classification(None, exc),
-            ssl_error=ssl_error,
-            error_detail=str(exc),
-        )
+
+    raise RuntimeError("URL probe ended without a result")
 
 
 def _write_attachment(results_dir: Path, name: str, content: str) -> str:
@@ -327,6 +352,7 @@ def run_once(
     preflight_attempts: int = 3,
     alert_state_file: str | Path = "alert_state.json",
     target_site: str = "",
+    url_attempts: int = 2,
 ) -> dict[str, Any]:
     run_started = time.perf_counter()
     started_at = utc_now()
@@ -387,7 +413,13 @@ def run_once(
     for site, site_targets in grouped.items():
         site_results: list[dict[str, Any]] = []
         for target in site_targets:
-            result = probe_url(target, proxies, timeout=timeout, max_redirects=max_redirects)
+            result = probe_url(
+                target,
+                proxies,
+                timeout=timeout,
+                max_redirects=max_redirects,
+                attempts=url_attempts,
+            )
             is_policy_warning = result.status_code == 401 and result.classification == "OK"
             status = "broken" if is_policy_warning else ("failed" if result.classification != "OK" or result.ssl_error else "passed")
             summary["total"] += 1
@@ -510,6 +542,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preflight-attempts", type=int, default=3)
     parser.add_argument("--alert-state-file", default="alert_state.json")
     parser.add_argument("--site", default="", help="Check only one configured site")
+    parser.add_argument("--url-attempts", type=int, default=2, help="Attempts per URL for connection/timeout failures")
     return parser
 
 
@@ -526,6 +559,7 @@ def main() -> int:
         preflight_attempts=args.preflight_attempts,
         alert_state_file=args.alert_state_file,
         target_site=args.site,
+        url_attempts=args.url_attempts,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary["proxy_preflight"]["ok"] else 2

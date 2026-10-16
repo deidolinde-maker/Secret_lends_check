@@ -34,6 +34,11 @@ pipeline {
             description: 'Timeout HTTP-проверки'
         )
         string(
+            name: 'URL_ATTEMPTS',
+            defaultValue: '2',
+            description: 'Количество попыток для URL при timeout/ошибке соединения'
+        )
+        string(
             name: 'REDIRECT_MAX_HOPS',
             defaultValue: '10',
             description: 'Максимальная длина redirect-цепочки'
@@ -144,6 +149,7 @@ for name, bundle in checks:
                               --expected-ip "$EXPECTED_PROXY_IP" \\
                               --allure-dir allure-results \\
                               --timeout "$HTTP_TIMEOUT_SECONDS" \\
+                              --url-attempts "$URL_ATTEMPTS" \\
                               --max-redirects "$REDIRECT_MAX_HOPS" \\
                               --preflight-attempts 3 \\
                               --site "$target_site" \\
@@ -178,6 +184,7 @@ for name, bundle in checks:
                             string(name: 'TARGET_SITE', value: params.TARGET_SITE ?: ''),
                             string(name: 'EXPECTED_PROXY_IP', value: params.EXPECTED_PROXY_IP),
                             string(name: 'HTTP_TIMEOUT_SECONDS', value: params.HTTP_TIMEOUT_SECONDS),
+                            string(name: 'URL_ATTEMPTS', value: params.URL_ATTEMPTS ?: '2'),
                             string(name: 'REDIRECT_MAX_HOPS', value: params.REDIRECT_MAX_HOPS)
                         ]
                 }

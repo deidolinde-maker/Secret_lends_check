@@ -122,6 +122,36 @@ def test_probe_classifies_403_as_ok(monkeypatch):
     assert result.status_code == 403
 
 
+def test_probe_retries_transport_failure_and_records_recovery():
+    calls = {"count": 0}
+
+    class FakeResponse:
+        url = "https://example.com/final"
+        status_code = 200
+
+    class FakeSession:
+        max_redirects = 0
+
+        def get(self, *args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise requests.ReadTimeout("upstream timed out")
+            return FakeResponse()
+
+    result = probe_url(
+        UrlTarget("example.com", "https://example.com"),
+        {"http": "http://proxy:8080", "https": "http://proxy:8080"},
+        attempts=2,
+        retry_delay=0,
+        session=FakeSession(),
+    )
+    assert calls["count"] == 2
+    assert result.classification == "OK"
+    assert result.attempts == 2
+    assert result.retry_recovered is True
+    assert "ReadTimeout" in result.attempt_errors[0]
+
+
 def test_direct_connection_is_forbidden():
     try:
         from monitor import proxy_mapping
