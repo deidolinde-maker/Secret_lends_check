@@ -7,16 +7,15 @@ pipeline {
         buildDiscarder(logRotator(daysToKeepStr: '30', artifactDaysToKeepStr: '7'))
     }
 
+    triggers {
+        cron('TZ=Europe/Moscow\n0 6,12,18 * * *')
+    }
+
     parameters {
         booleanParam(
             name: 'ALERTS_ENABLED',
             defaultValue: true,
             description: 'Включить Telegram alerts через credentials Big Landing Test'
-        )
-        booleanParam(
-            name: 'CHAIN_NEXT_RUN',
-            defaultValue: true,
-            description: 'После завершения ставить следующий прогон через 1 час'
         )
         string(
             name: 'TARGET_SITE',
@@ -173,20 +172,6 @@ for name, bundle in checks:
                     allure includeProperties: false, jdk: '', results: [[path: 'allure-results']]
                 } else {
                     echo 'Allure results are absent; report publication skipped.'
-                }
-                if (params.CHAIN_NEXT_RUN) {
-                    build job: env.JOB_NAME,
-                        wait: false,
-                        quietPeriod: 3600,
-                        parameters: [
-                            booleanParam(name: 'ALERTS_ENABLED', value: params.ALERTS_ENABLED),
-                            booleanParam(name: 'CHAIN_NEXT_RUN', value: params.CHAIN_NEXT_RUN),
-                            string(name: 'TARGET_SITE', value: params.TARGET_SITE ?: ''),
-                            string(name: 'EXPECTED_PROXY_IP', value: params.EXPECTED_PROXY_IP),
-                            string(name: 'HTTP_TIMEOUT_SECONDS', value: params.HTTP_TIMEOUT_SECONDS),
-                            string(name: 'URL_ATTEMPTS', value: params.URL_ATTEMPTS ?: '2'),
-                            string(name: 'REDIRECT_MAX_HOPS', value: params.REDIRECT_MAX_HOPS)
-                        ]
                 }
             }
         }
